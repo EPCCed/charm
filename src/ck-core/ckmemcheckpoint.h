@@ -54,6 +54,7 @@ public:
 /// memory or disk checkpointing
 #define CkCheckPoint_inMEM   1
 #define CkCheckPoint_inDISK  2
+#define CkCheckPoint_inPMEM  3
 
 class CkCheckPTEntry{
   std::vector<CkArrayCheckPTMessage *> data;
@@ -74,9 +75,23 @@ public:
       fname = "/tmp/ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #endif
       if(mkstemp(&fname[0])<0)
-	{
-	  CmiAbort("mkstemp fail in checkpoint");
-	}
+      {
+        CmiAbort("mkstemp fail in checkpoint");
+      }
+#else
+      fname = tmpnam(NULL);
+#endif
+    } else if (where == CkCheckPoint_inPMEM) {
+#if CMK_USE_MKSTEMP
+#if CMK_CONVERSE_MPI
+      fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+#else
+      fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+#endif
+      if(mkstemp(&fname[0])<0)
+      {
+        CmiAbort("mkstemp fail in checkpoint");
+      }
 #else
       fname = tmpnam(NULL);
 #endif
@@ -85,7 +100,7 @@ public:
 
   void updateBuffer(int pointer, CkArrayCheckPTMessage * msg)
   {
-    if(where == CkCheckPoint_inDISK)
+    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM)
     {
       envelope *env = UsrToEnv(msg);
       CkUnpackMessage(&env);
@@ -112,7 +127,7 @@ public:
   
   CkArrayCheckPTMessage * getCopy(int pointer)
   {
-    if(where == CkCheckPoint_inDISK)
+    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM)
     {
       CkArrayCheckPTMessage *msg;
       FILE *f = fopen(fname.c_str(),"rb");

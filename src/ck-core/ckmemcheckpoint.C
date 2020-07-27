@@ -32,6 +32,10 @@ added 4/16/04:
 1. also support the case when there is a pool of extra processors.
    set CK_NO_PROC_POOL to 0.
 
+added 7/27/20:
+1. also support for double in-pmem checkpoint/restart
+   set "where" to CkCheckPoint_inPMEM in init()
+
 TODO:
 1. checkpoint scheme can be reimplemented based on per processor scheme;
  restart phase should restore/reset group table, etc on all processors, thus flushStates() can be eliminated.
@@ -340,6 +344,75 @@ public:
   }
 };
 
+// checkpoint holder class - for in-pmem checkpointing
+class CkPmemCheckPTInfo: public CkCheckPTInfo 
+{
+  std::string fname;
+  int bud1, bud2;
+  size_t len; 			// checkpoint size
+public:
+  CkPmemCheckPTInfo(CkArrayID a, CkGroupID loc, CkArrayIndex idx, int pno, int myidx): CkCheckPTInfo(a, loc, idx, pno)
+  {
+#if CMK_USE_MKSTEMP
+#if CMK_CONVERSE_MPI
+    fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+#else
+    fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+#endif
+    if(mkstemp(&fname[0]) < 0)
+    {
+      CmiAbort("mkstemp fail in checkpoint");
+    }
+#else
+    fname = tmpnam(NULL);
+#endif
+    bud1 = bud2 = -1;
+    len = 0;
+  }
+  ~CkPmemCheckPTInfo() 
+  {
+    remove(fname.c_str());
+  }
+  inline void updateBuffer(CkArrayCheckPTMessage *data) 
+  {
+    double t = CmiWallTimer();
+    // unpack it
+    envelope *env = UsrToEnv(data);
+    CkUnpackMessage(&env);
+    data = (CkArrayCheckPTMessage *)EnvToUsr(env);
+    FILE *f = fopen(fname.c_str(),"wb");
+    PUP::toDisk p(f);
+    CkPupMessage(p, (void **)&data);
+    // delay sync to the end because otherwise the messages are blocked
+//    fsync(fileno(f));
+    fclose(f);
+    bud1 = data->bud1;
+    bud2 = data->bud2;
+    len = data->len;
+    delete data;
+    //DEBUGF("[%d] updateBuffer took %f seconds. \n", CkMyPe(), CmiWallTimer()-t);
+  }
+  inline CkArrayCheckPTMessage * getCopy()	// get a copy of checkpoint
+  {
+    CkArrayCheckPTMessage *data;
+    FILE *f = fopen(fname.c_str(),"rb");
+    PUP::fromDisk p(f);
+    CkPupMessage(p, (void **)&data);
+    fclose(f);
+    data->bud1 = bud1;				// update the buddies
+    data->bud2 = bud2;
+    return data;
+  }
+  inline void updateBuddy(int b1, int b2) {
+     bud1 = b1; bud2 = b2;
+     pNo = b1;  if (pNo == CkMyPe()) pNo = b2;
+     CmiAssert(pNo != CkMyPe());
+  }
+  inline size_t getSize() {
+     return len; 
+  }
+};
+
 CkMemCheckPT::CkMemCheckPT(int w)
 {
   int numnodes = 0;
@@ -507,8 +580,10 @@ void CkMemCheckPT::createEntry(CkArrayID aid, CkGroupID loc, CkArrayIndex index,
   CkCheckPTInfo *newEntry;
   if (where == CkCheckPoint_inMEM)
     newEntry = new CkMemCheckPTInfo(aid, loc, index, buddy);
-  else
+  else if (where == CkCheckPoint_inDISK)
     newEntry = new CkDiskCheckPTInfo(aid, loc, index, buddy, len+1);
+  else
+    newEntry = new CkPmemCheckPTInfo(aid, loc, index, buddy, len+1);
   ckTable.push_back(newEntry);
   //DEBUGF("[%d] CkMemCheckPT::createEntry for arrayID %d:", CkMyPe(), ((CkGroupID)aid).idx); index.print(); CkPrintf("\n");
 }
@@ -659,6 +734,10 @@ void CkMemCheckPT::recvArrayCheckpoint(CkArrayCheckPTMessage *msg)
 			// another barrier for finalize the writing using fsync
 			contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
 		  }
+      else if (where == CkCheckPoint_inPMEM) {
+			// another barrier for finalize the writing using fsync
+			contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
+		  }
 		  else
 			CmiAbort("Unknown checkpoint scheme");
 		  recvCount = 0;
@@ -748,6 +827,10 @@ void CkMemCheckPT::recvData(CkArrayCheckPTMessage *msg)
         contribute(CkCallback(CkReductionTarget(CkMemCheckPT, cpFinish), thisProxy[cpStarter]));
       }
       else if (where == CkCheckPoint_inDISK) {
+        // another barrier for finalize the writing using fsync
+        contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
+      }
+      else if (where == CkCheckPoint_inPMEM) {
         // another barrier for finalize the writing using fsync
         contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
       }
@@ -1605,6 +1688,9 @@ void init_memcheckpt(char **argv)
     if (CmiGetArgFlagDesc(argv, "+ftc_disk", "Double-disk Checkpointing")) {
       arg_where = CkCheckPoint_inDISK;
     }
+    if (CmiGetArgFlagDesc(argv, "+ftc_pmem", "Double-PMem Checkpointing")) {
+      arg_where = CkCheckPoint_inPMEM;
+    }
 
 	// initiliazing _crashedNode variable
 	CpvInitialize(int, _crashedNode);
@@ -1621,6 +1707,8 @@ public:
     if (!quietModeRequested) {
       if (arg_where == CkCheckPoint_inDISK)
         CkPrintf("CharmFT> Activated double-disk checkpointing.\n");
+      else if (arg_where == CkCheckPoint_inPMEM)
+        CkPrintf("CharmFT> Activated double-pmem checkpointing.\n");
       else if (arg_where == CkCheckPoint_inMEM)
         CkPrintf("CharmFT> Activated double in-memory checkpointing.\n");
     }

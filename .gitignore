@@ -1,5 +1,9 @@
 # Project-level ignore patterns
 
+# Ignore files for Visual Code
+.vscode/
+/**/.vscode/
+
 # Ignore objects, archives etc.
 *.[oad]
 
