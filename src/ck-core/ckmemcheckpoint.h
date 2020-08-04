@@ -3,6 +3,8 @@
 
 #include "CkMemCheckpoint.decl.h"
 
+//#define CK_MEM_CHECKPT_DIR "/lustre/home/nx04/nx04/rrocco/files/"
+
 extern CkGroupID ckCheckPTGroupID;
 class CkArrayCheckPTReqMessage: public CMessage_CkArrayCheckPTReqMessage {
 public: 
@@ -69,24 +71,43 @@ public:
     if(where == CkCheckPoint_inDISK)
     {
 #if CMK_USE_MKSTEMP
+#ifdef CK_MEM_CHECKPT_DIR
+#if CMK_CONVERSE_MPI
+      fname = std::string(CK_MEM_CHECKPT_DIR) + "ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+#else
+      fname = std::string(CK_MEM_CHECKPT_DIR) + "ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+#endif
+#else
 #if CMK_CONVERSE_MPI
       fname = "/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #else
       fname = "/tmp/ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #endif
+#endif
       if(mkstemp(&fname[0])<0)
-      {
-        CmiAbort("mkstemp fail in checkpoint");
-      }
+        {
+          CmiAbort("mkstemp fail in checkpoint");
+        }
 #else
       fname = tmpnam(NULL);
 #endif
     } else if (where == CkCheckPoint_inPMEM) {
 #if CMK_USE_MKSTEMP
+      int proc;
+      unsigned long a,d,c;
+      __asm__ volatile("rdtscp" : "=a" (a), "=d" (d), "=c" (c));
+      proc = (c & 0xFFF000)>>12;
+
 #if CMK_CONVERSE_MPI
-      fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      if(proc % 2 == 0)
+        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      else
+        fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #else
-      fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      if(proc % 2 == 0)
+        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      else
+        fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #endif
       if(mkstemp(&fname[0])<0)
       {

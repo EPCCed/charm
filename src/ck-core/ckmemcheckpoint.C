@@ -285,10 +285,18 @@ public:
   CkDiskCheckPTInfo(CkArrayID a, CkGroupID loc, CkArrayIndex idx, int pno, int myidx): CkCheckPTInfo(a, loc, idx, pno)
   {
 #if CMK_USE_MKSTEMP
+#ifdef CK_MEM_CHECKPT_DIR
+#if CMK_CONVERSE_MPI
+    fname = std::string(CK_MEM_CHECKPT_DIR) + "ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+#else
+    fname = std::string(CK_MEM_CHECKPT_DIR) + "ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+#endif
+#else
 #if CMK_CONVERSE_MPI
     fname = "/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
 #else
     fname = "/tmp/ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+#endif
 #endif
     if(mkstemp(&fname[0]) < 0)
     {
@@ -354,10 +362,21 @@ public:
   CkPmemCheckPTInfo(CkArrayID a, CkGroupID loc, CkArrayIndex idx, int pno, int myidx): CkCheckPTInfo(a, loc, idx, pno)
   {
 #if CMK_USE_MKSTEMP
+      int proc;
+      unsigned long ax,d,c;
+      __asm__ volatile("rdtscp" : "=a" (ax), "=d" (d), "=c" (c));
+      proc = (c & 0xFFF000)>>12;
+
 #if CMK_CONVERSE_MPI
-    fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+      if(proc % 2 == 0)
+        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+      else
+        fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
 #else
-    fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+      if(proc % 2 == 0)
+        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+      else
+	fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
 #endif
     if(mkstemp(&fname[0]) < 0)
     {
