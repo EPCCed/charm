@@ -54,9 +54,10 @@ public:
 };
 
 /// memory or disk checkpointing
-#define CkCheckPoint_inMEM   1
-#define CkCheckPoint_inDISK  2
-#define CkCheckPoint_inPMEM  3
+#define CkCheckPoint_inMEM      1
+#define CkCheckPoint_inDISK     2
+#define CkCheckPoint_inPMEM     3
+#define CkCheckPoint_inPMEMLIB  4
 
 class CkCheckPTEntry{
   std::vector<CkArrayCheckPTMessage *> data;
@@ -135,7 +136,21 @@ public:
       bud1 = msg->bud1;
       bud2 = msg->bud2;
       delete msg;
-    }else
+    } else if (where == CkCheckPoint_inPMEMLIB) {
+      envelope *env = UsrToEnv(msg);
+      CkUnpackMessage(&env);
+      data[pointer] = (CkArrayCheckPTMessage *)EnvToUsr(env);
+      //FILE *f = fopen(fname.c_str(),"wb");
+      PUP::toPmem p();
+      CkPupMessage(p, (void **)&msg);
+      // delay sync to the end because otherwise the messages are blocked
+  //    fsync(fileno(f));
+      //fclose(f);
+      bud1 = msg->bud1;
+      bud2 = msg->bud2;
+      delete msg;
+    }
+    else
     {
       CmiAssert(where == CkCheckPoint_inMEM);
       CmiAssert(msg!=NULL);
@@ -158,7 +173,17 @@ public:
       msg->bud1 = bud1;				// update the buddies
       msg->bud2 = bud2;
       return msg;
-    }else
+    } else if(where == CkCheckPoint_inPMEMLIB) {
+      CkArrayCheckPTMessage *msg;
+      //FILE *f = fopen(fname.c_str(),"rb");
+      PUP::fromPmem p();
+      CkPupMessage(p, (void **)&msg);
+      //fclose(f);
+      msg->bud1 = bud1;				// update the buddies
+      msg->bud2 = bud2;
+      return msg;
+    }
+    else
     {
       CmiAssert(where == CkCheckPoint_inMEM);
       if (data[pointer] == NULL) {

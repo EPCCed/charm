@@ -167,6 +167,29 @@ void PUP::fromMem::bytes(void *p,size_t n,size_t itemSize,dataType t)
 	buf+=n;
 }
 
+/*Pmem PUP::er's*/
+void PUP::toPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
+{
+#ifdef CK_CHECK_PUP
+	((pupCheckRec *)buf)->write(t,n);
+	buf+=sizeof(pupCheckRec);
+#endif
+	n*=itemSize;
+	memcpy((void *)buf,p,n);
+  pmem_persist(buf,n);
+	buf+=n;
+}
+void PUP::fromPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
+{
+#ifdef CK_CHECK_PUP
+	((pupCheckRec *)buf)->check(t,n);
+	buf+=sizeof(pupCheckRec);
+#endif
+	n*=itemSize; 
+	memcpy(p,(const void *)buf,n); 
+	buf+=n;
+}
+
 void PUP::sizer::pup_buffer(void *&p,size_t n, size_t itemSize, dataType t) {
 #ifdef CK_CHECK_PUP
 	nBytes+=sizeof(pupCheckRec);
@@ -179,6 +202,10 @@ void PUP::sizer::pup_buffer(void *&p,size_t n, size_t itemSize, dataType t, std:
 }
 
 void PUP::toMem::pup_buffer(void *&p,size_t n,size_t itemSize,dataType t) {
+	pup_buffer(p, n, itemSize, t, malloc, free);
+}
+
+void PUP::toPmem::pup_buffer(void *&p,size_t n,size_t itemSize,dataType t) {
 	pup_buffer(p, n, itemSize, t, malloc, free);
 }
 
@@ -213,7 +240,42 @@ void PUP::fromMem::pup_buffer_generic(void *&p,size_t n, size_t itemSize, dataTy
 	buf+=sizeof(src);
 }
 
+void PUP::fromPmem::pup_buffer_generic(void *&p,size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, bool isMalloc) {
+#ifdef CK_CHECK_PUP
+	((pupCheckRec *)buf)->check(t,n);
+	buf+=sizeof(pupCheckRec);
+#endif
+	// Unpup a CmiNcpyBuffer object with the callback
+	CmiNcpyBuffer src;
+
+	PUP::fromPmem fPmem(buf);
+	fPmem|src;
+	CmiAssert(sizeof(src) == sizeof(CmiNcpyBuffer));
+
+	// Allocate only if inter-process
+	if(isUnpacking()) {
+		if(CmiNodeOf(src.pe)!=CmiMyNode()) {
+			if(isMalloc)
+				p = malloc(n * itemSize);
+			else
+				p = allocate(n);
+			CmiNcpyBuffer dest(p, n*itemSize);
+			zcPupGet(src, dest);
+		} else {
+			p = (void *)src.ptr;
+			// Free the allocated zcPupSourceInfo
+			zcPupSourceInfo *srcInfo = (zcPupSourceInfo *)(src.ref);
+			delete srcInfo;
+		}
+	}
+	buf+=sizeof(src);
+}
+
 void PUP::fromMem::pup_buffer(void *&p,size_t n,size_t itemSize,dataType t) {
+	pup_buffer_generic(p, n, itemSize, t, malloc, true);
+}
+
+void PUP::fromPmem::pup_buffer(void *&p,size_t n,size_t itemSize,dataType t) {
 	pup_buffer_generic(p, n, itemSize, t, malloc, true);
 }
 
@@ -232,7 +294,26 @@ void PUP::toMem::pup_buffer(void *&p,size_t n, size_t itemSize, dataType t, std:
 	buf+=sizeof(src);
 }
 
+void PUP::toPmem::pup_buffer(void *&p,size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, std::function<void (void *)> deallocate) {
+#ifdef CK_CHECK_PUP
+	((pupCheckRec *)buf)->write(t,n);
+	buf+=sizeof(pupCheckRec);
+#endif
+	// Create a CmiNcpyBuffer object with the callback
+	CmiNcpyBuffer src(p, n*itemSize);
+	zcPupSourceInfo *srcInfo = zcPupAddSource(src, deallocate);
+	src.ref = srcInfo;
+	CmiAssert(sizeof(src) == sizeof(CmiNcpyBuffer));
+	PUP::toPmem tMem(buf);
+	tMem|src;
+	buf+=sizeof(src);
+}
+
 void PUP::fromMem::pup_buffer(void *&p,size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, std::function<void (void *)> deallocate) {
+	pup_buffer_generic(p, n, itemSize, t, allocate, false);
+}
+
+void PUP::fromPmem::pup_buffer(void *&p,size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, std::function<void (void *)> deallocate) {
 	pup_buffer_generic(p, n, itemSize, t, allocate, false);
 }
 
@@ -479,6 +560,14 @@ void PUP::mem::impl_startSeek(seekBlock &s) /*Begin a seeking block*/
 size_t PUP::mem::impl_tell(seekBlock &s) /*Give the current offset*/
   {return buf-s.data.ptr;}
 void PUP::mem::impl_seek(seekBlock &s,size_t off) /*Seek to the given offset*/
+  {buf=s.data.ptr+off;}
+
+/*Pmem buffer seeking is trivial*/
+void PUP::pmem::impl_startSeek(seekBlock &s) /*Begin a seeking block*/
+  {s.data.ptr=buf;}
+size_t PUP::pmem::impl_tell(seekBlock &s) /*Give the current offset*/
+  {return buf-s.data.ptr;}
+void PUP::pmem::impl_seek(seekBlock &s,size_t off) /*Seek to the given offset*/
   {buf=s.data.ptr+off;}
 
 /*Disk buffer seeking is also simple*/

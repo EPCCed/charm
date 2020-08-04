@@ -59,6 +59,8 @@ class bar {
 #include <utility>
 #include <functional>
 
+#include <libpmem.h> // for pmem packers/unpackers
+
 #ifndef __cplusplus
 #error "Use pup_c.h for C programs-- pup.h is for C++ programs"
 #endif
@@ -465,6 +467,99 @@ inline void fromMemBuf(T &t,void *buf,size_t len) {
 	PUP::fromMem p(buf);
 	p|t;
 	if (p.size()!=len) CmiAbort("Size mismatch during PUP::fromMemBuf!\n"
+		"This means your pup routine doesn't match during packing and unpacking");
+}
+
+/********** PUP::er -- Binary pmem buffer pack/unpack *********/
+class pmem : public er { //Pmem-buffer packers and unpackers
+ protected:
+  myByte *origBuf; //Start of pmem buffer
+  myByte *buf; //Pmem buffer (stuff gets packed into/out of here)
+  pmem(unsigned int type):er(type) {
+    int fd;
+    /* Create a pmem file */
+    if ((fd = open("/mnt/pmem_fsdax0/chkpt", O_CREAT|O_RDWR, 0666)) < 0) {
+      CmiAbort("can't open pmem file");
+    }
+    /* Allocate the pmem */
+    if ((errno = posix_fallocate(fd, 0, PMEM_LEN)) != 0) {
+      CmiAbort("can't allocate pmem file");
+    }
+    /* memory map it */
+    if ((origBuf = buf = pmem_map(fd)) == NULL) {
+      CmiAbort("can't mmap pmem file");
+    }
+    close(fd);
+  }
+  pmem(const pmem &p);			//You don't want to copy
+  void operator=(const pmem &p);		// You don't want to copy
+
+  //For seeking (pack/unpack in different orders)
+  virtual void impl_startSeek(seekBlock &s); /*Begin a seeking block*/
+  virtual size_t impl_tell(seekBlock &s); /*Give the current offset*/
+  virtual void impl_seek(seekBlock &s,size_t off); /*Seek to the given offset*/
+ public:
+  //Return the current number of buffer bytes used
+  size_t size(void) const {return buf-origBuf;}
+
+  inline char* get_current_pointer() const {
+    return reinterpret_cast<char*>(buf);
+  }
+
+  inline char* get_orig_pointer() const {
+    return reinterpret_cast<char*>(origBuf);
+  }
+
+  inline void reset() {
+    buf = origBuf;
+  }
+
+  inline void advance(size_t const offset) {
+    buf += offset;
+  }
+};
+
+//For packing into a preallocated, presized pmem buffer
+class toPmem : public pmem {
+ protected:
+  //Generic bottleneck: pack n items of size itemSize from p.
+  virtual void bytes(void *p,size_t n,size_t itemSize,dataType t);
+
+  virtual void pup_buffer(void *&p, size_t n, size_t itemSize, dataType t);
+  virtual void pup_buffer(void *&p, size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, std::function<void (void *)> deallocate);
+
+ public:
+  //Write data to the given buffer
+  toPmem():pmem(IS_PACKING) {}
+};
+template <class T>
+inline void toPmemBuf(T &t,void *buf, size_t len) {
+	PUP::toPmem p(buf);
+	p|t;
+	if (p.size()!=len) CmiAbort("Size mismatch during PUP::toPmemBuf!\n"
+		"This means your pup routine doesn't match during sizing and packing");
+}
+
+//For unpacking from a pmem buffer
+class fromPmem : public pmem {
+ protected:
+  //Generic bottleneck: unpack n items of size itemSize from p.
+  virtual void bytes(void *p,size_t n,size_t itemSize,dataType t);
+
+  virtual void pup_buffer(void *&p, size_t n, size_t itemSize, dataType t);
+  virtual void pup_buffer(void *&p, size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, std::function<void (void *)> deallocate);
+
+  void pup_buffer_generic(void *&p,size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, bool isMalloc);
+
+ public:
+  //Read data from the given buffer
+  fromPmem():pmem(IS_UNPACKING) {}
+};
+template <class T>
+inline void fromPmemBuf(T &t,void *buf,size_t len) {
+	PUP::fromPmem p(buf);
+	p|t;
+	if (p.size()!=len) CmiAbort("Size mismatch during PUP::fromPmemBuf!\n"
 		"This means your pup routine doesn't match during packing and unpacking");
 }
 

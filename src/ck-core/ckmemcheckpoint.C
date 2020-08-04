@@ -432,6 +432,89 @@ public:
   }
 };
 
+// checkpoint holder class - for in-pmem checkpointing using pmemlib
+class CkPmemLibCheckPTInfo: public CkCheckPTInfo 
+{
+  //std::string fname;
+  int bud1, bud2;
+  size_t len; 			// checkpoint size
+public:
+  CkPmemLibCheckPTInfo(CkArrayID a, CkGroupID loc, CkArrayIndex idx, int pno, int myidx): CkCheckPTInfo(a, loc, idx, pno)
+  {
+/*#if CMK_USE_MKSTEMP
+      int proc;
+      unsigned long ax,d,c;
+      __asm__ volatile("rdtscp" : "=a" (ax), "=d" (d), "=c" (c));
+      proc = (c & 0xFFF000)>>12;
+
+#if CMK_CONVERSE_MPI
+      if(proc % 2 == 0)
+        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+      else
+        fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+#else
+      if(proc % 2 == 0)
+        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+      else
+	fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPe()) + "-" + std::to_string(myidx) + "-XXXXXX";
+#endif
+    if(mkstemp(&fname[0]) < 0)
+    {
+      CmiAbort("mkstemp fail in checkpoint");
+    }
+#else
+    fname = tmpnam(NULL);
+#endif
+*/
+    bud1 = bud2 = -1;
+    len = 0;
+  }
+  ~CkPmemLibCheckPTInfo() 
+  {
+    //remove(fname.c_str());
+  }
+  inline void updateBuffer(CkArrayCheckPTMessage *data) 
+  {
+    double t = CmiWallTimer();
+    // unpack it
+    envelope *env = UsrToEnv(data);
+    CkUnpackMessage(&env);
+    data = (CkArrayCheckPTMessage *)EnvToUsr(env);
+    //FILE *f = fopen(fname.c_str(),"wb");
+    //PUP::toDisk p(f);
+    PUP::toPmem p();
+    CkPupMessage(p, (void **)&data);
+    // delay sync to the end because otherwise the messages are blocked
+//    fsync(fileno(f));
+    //fclose(f);
+    bud1 = data->bud1;
+    bud2 = data->bud2;
+    len = data->len;
+    delete data;
+    //DEBUGF("[%d] updateBuffer took %f seconds. \n", CkMyPe(), CmiWallTimer()-t);
+  }
+  inline CkArrayCheckPTMessage * getCopy()	// get a copy of checkpoint
+  {
+    CkArrayCheckPTMessage *data;
+    //FILE *f = fopen(fname.c_str(),"rb");
+    //PUP::fromDisk p(f);
+    PUP::fromPmem p();
+    CkPupMessage(p, (void **)&data);
+    //fclose(f);
+    data->bud1 = bud1;				// update the buddies
+    data->bud2 = bud2;
+    return data;
+  }
+  inline void updateBuddy(int b1, int b2) {
+     bud1 = b1; bud2 = b2;
+     pNo = b1;  if (pNo == CkMyPe()) pNo = b2;
+     CmiAssert(pNo != CkMyPe());
+  }
+  inline size_t getSize() {
+     return len; 
+  }
+};
+
 CkMemCheckPT::CkMemCheckPT(int w)
 {
   int numnodes = 0;
@@ -601,8 +684,10 @@ void CkMemCheckPT::createEntry(CkArrayID aid, CkGroupID loc, CkArrayIndex index,
     newEntry = new CkMemCheckPTInfo(aid, loc, index, buddy);
   else if (where == CkCheckPoint_inDISK)
     newEntry = new CkDiskCheckPTInfo(aid, loc, index, buddy, len+1);
-  else
+  else if (where == CkCheckPoint_inPMEM)
     newEntry = new CkPmemCheckPTInfo(aid, loc, index, buddy, len+1);
+  else
+    newEntry = new CkPmemLibCheckPTInfo(aid, loc, index, buddy, len+1);
   ckTable.push_back(newEntry);
   //DEBUGF("[%d] CkMemCheckPT::createEntry for arrayID %d:", CkMyPe(), ((CkGroupID)aid).idx); index.print(); CkPrintf("\n");
 }
@@ -757,6 +842,10 @@ void CkMemCheckPT::recvArrayCheckpoint(CkArrayCheckPTMessage *msg)
 			// another barrier for finalize the writing using fsync
 			contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
 		  }
+      else if (where == CkCheckPoint_inPMEMLIB) {
+			// another barrier for finalize the writing using fsync
+			contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
+		  }
 		  else
 			CmiAbort("Unknown checkpoint scheme");
 		  recvCount = 0;
@@ -850,6 +939,10 @@ void CkMemCheckPT::recvData(CkArrayCheckPTMessage *msg)
         contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
       }
       else if (where == CkCheckPoint_inPMEM) {
+        // another barrier for finalize the writing using fsync
+        contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
+      }
+      else if (where == CkCheckPoint_inPMEMLIB) {
         // another barrier for finalize the writing using fsync
         contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
       }
@@ -1710,6 +1803,9 @@ void init_memcheckpt(char **argv)
     if (CmiGetArgFlagDesc(argv, "+ftc_pmem", "Double-PMem Checkpointing")) {
       arg_where = CkCheckPoint_inPMEM;
     }
+    if (CmiGetArgFlagDesc(argv, "+ftc_pmemlib", "Double-PMem Checkpointing using pmem library")) {
+      arg_where = CkCheckPoint_inPMEMLIB;
+    }
 
 	// initiliazing _crashedNode variable
 	CpvInitialize(int, _crashedNode);
@@ -1728,6 +1824,8 @@ public:
         CkPrintf("CharmFT> Activated double-disk checkpointing.\n");
       else if (arg_where == CkCheckPoint_inPMEM)
         CkPrintf("CharmFT> Activated double-pmem checkpointing.\n");
+      else if (arg_where == CkCheckPoint_inPMEMLIB)
+        CkPrintf("CharmFT> Activated double-pmem checkpointing using pmem library.\n");
       else if (arg_where == CkCheckPoint_inMEM)
         CkPrintf("CharmFT> Activated double in-memory checkpointing.\n");
     }
