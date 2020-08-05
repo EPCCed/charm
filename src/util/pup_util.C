@@ -176,7 +176,10 @@ void PUP::toPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
 #endif
 	n*=itemSize;
 	memcpy((void *)buf,p,n);
-  pmem_persist(buf,n);
+	if(pmem_is_pmem(buf, n))
+  		pmem_persist(buf,n);
+	else
+		pmem_msync(buf, n);
 	buf+=n;
 }
 void PUP::fromPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
@@ -186,6 +189,10 @@ void PUP::fromPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
 	buf+=sizeof(pupCheckRec);
 #endif
 	n*=itemSize; 
+	if(pmem_is_pmem(buf, n))
+                pmem_persist(buf,n);
+        else
+                pmem_msync(buf, n);
 	memcpy(p,(const void *)buf,n); 
 	buf+=n;
 }
@@ -248,7 +255,7 @@ void PUP::fromPmem::pup_buffer_generic(void *&p,size_t n, size_t itemSize, dataT
 	// Unpup a CmiNcpyBuffer object with the callback
 	CmiNcpyBuffer src;
 
-	PUP::fromPmem fPmem(buf);
+	PUP::fromPmem fPmem;
 	fPmem|src;
 	CmiAssert(sizeof(src) == sizeof(CmiNcpyBuffer));
 
@@ -304,7 +311,7 @@ void PUP::toPmem::pup_buffer(void *&p,size_t n, size_t itemSize, dataType t, std
 	zcPupSourceInfo *srcInfo = zcPupAddSource(src, deallocate);
 	src.ref = srcInfo;
 	CmiAssert(sizeof(src) == sizeof(CmiNcpyBuffer));
-	PUP::toPmem tMem(buf);
+	PUP::toPmem tMem;
 	tMem|src;
 	buf+=sizeof(src);
 }

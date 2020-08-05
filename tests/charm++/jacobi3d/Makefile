@@ -6,7 +6,7 @@ OBJS = jacobi3d.o
 all: jacobi3d
 
 jacobi3d: $(OBJS)
-	$(CHARMC) -language charm++ -module TreeLB -o jacobi3d $(OBJS)
+	$(CHARMC) -language charm++ -lpmem -module TreeLB -o jacobi3d $(OBJS)
 
 projections: $(OBJS)
 	$(CHARMC) -language charm++ -tracemode projections -lz -o jacobi3d.prj $(OBJS)
@@ -17,22 +17,28 @@ summary: $(OBJS)
 jacobi3d.decl.h: jacobi3d.ci
 	$(CHARMC)  jacobi3d.ci
 
-fttest: syncfttest pmemfttest diskfttest
+fttest: syncfttest pmemfttest diskfttest pmemlibfttest
 
 syncfttest: jacobi3d
-	$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB )
+	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB )
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
 
 pmemfttest: jacobi3d
-	$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +ftc_pmem )
+	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB +ftc_pmem )
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
 
 diskfttest: jacobi3d
-	$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +ftc_disk )
+	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB +ftc_disk )
+	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
+	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
+	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
+
+pmemlibfttest: jacobi3d
+	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB +ftc_pmemlib )
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )

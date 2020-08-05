@@ -59,6 +59,12 @@ class bar {
 #include <utility>
 #include <functional>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
 #include <libpmem.h> // for pmem packers/unpackers
 
 #ifndef __cplusplus
@@ -475,24 +481,21 @@ class pmem : public er { //Pmem-buffer packers and unpackers
  protected:
   myByte *origBuf; //Start of pmem buffer
   myByte *buf; //Pmem buffer (stuff gets packed into/out of here)
+  size_t mapped_len;
   pmem(unsigned int type):er(type) {
-    int fd;
+    int is_pmem;
     /* Create a pmem file */
-    if ((fd = open("/mnt/pmem_fsdax0/chkpt", O_CREAT|O_RDWR, 0666)) < 0) {
+    if ((origBuf = buf = (myByte*) pmem_map_file("/mnt/pmem_fsdax0/chkpt", 1024*1024*1024, PMEM_FILE_CREATE,
+	0666, &mapped_len, &is_pmem)) == NULL) {
       CmiAbort("can't open pmem file");
     }
-    /* Allocate the pmem */
-    if ((errno = posix_fallocate(fd, 0, PMEM_LEN)) != 0) {
-      CmiAbort("can't allocate pmem file");
-    }
-    /* memory map it */
-    if ((origBuf = buf = pmem_map(fd)) == NULL) {
-      CmiAbort("can't mmap pmem file");
-    }
-    close(fd);
   }
   pmem(const pmem &p);			//You don't want to copy
   void operator=(const pmem &p);		// You don't want to copy
+
+  ~pmem() {
+    pmem_unmap(origBuf, mapped_len);
+  }
 
   //For seeking (pack/unpack in different orders)
   virtual void impl_startSeek(seekBlock &s); /*Begin a seeking block*/

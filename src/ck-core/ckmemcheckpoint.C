@@ -50,6 +50,7 @@ TODO:
 #include "register.h"
 #include "conv-ccs.h"
 #include <signal.h>
+#include "pup.h"
 
 extern int quietModeRequested;
 
@@ -482,7 +483,7 @@ public:
     data = (CkArrayCheckPTMessage *)EnvToUsr(env);
     //FILE *f = fopen(fname.c_str(),"wb");
     //PUP::toDisk p(f);
-    PUP::toPmem p();
+    PUP::toPmem p;
     CkPupMessage(p, (void **)&data);
     // delay sync to the end because otherwise the messages are blocked
 //    fsync(fileno(f));
@@ -498,7 +499,7 @@ public:
     CkArrayCheckPTMessage *data;
     //FILE *f = fopen(fname.c_str(),"rb");
     //PUP::fromDisk p(f);
-    PUP::fromPmem p();
+    PUP::fromPmem p;
     CkPupMessage(p, (void **)&data);
     //fclose(f);
     data->bud1 = bud1;				// update the buddies

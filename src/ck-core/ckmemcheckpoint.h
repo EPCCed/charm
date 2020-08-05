@@ -2,6 +2,7 @@
 #define _CK_MEM_CHECKPT_
 
 #include "CkMemCheckpoint.decl.h"
+#include "pup.h"
 
 //#define CK_MEM_CHECKPT_DIR "/lustre/home/nx04/nx04/rrocco/files/"
 
@@ -141,7 +142,7 @@ public:
       CkUnpackMessage(&env);
       data[pointer] = (CkArrayCheckPTMessage *)EnvToUsr(env);
       //FILE *f = fopen(fname.c_str(),"wb");
-      PUP::toPmem p();
+      PUP::toPmem p;
       CkPupMessage(p, (void **)&msg);
       // delay sync to the end because otherwise the messages are blocked
   //    fsync(fileno(f));
@@ -176,7 +177,7 @@ public:
     } else if(where == CkCheckPoint_inPMEMLIB) {
       CkArrayCheckPTMessage *msg;
       //FILE *f = fopen(fname.c_str(),"rb");
-      PUP::fromPmem p();
+      PUP::fromPmem p;
       CkPupMessage(p, (void **)&msg);
       //fclose(f);
       msg->bud1 = bud1;				// update the buddies
