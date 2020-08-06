@@ -17,28 +17,28 @@ summary: $(OBJS)
 jacobi3d.decl.h: jacobi3d.ci
 	$(CHARMC)  jacobi3d.ci
 
-fttest: syncfttest pmemfttest diskfttest pmemlibfttest
+fttest: memtest pmemfsdaxtest pmempmdktest disktest
 
-syncfttest: jacobi3d
-	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB )
+memtest: jacobi3d
+	$(call run, ./jacobi3d 512 256 100 10 +p7 +balancer DummyLB )
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
 
-pmemfttest: jacobi3d
-	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB +ftc_pmem )
+pmemfsdaxtest: jacobi3d
+	$(call run, ./jacobi3d 512 256 100 10 +p7 +balancer DummyLB +ftc_pmem_fsdax )
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
 
-diskfttest: jacobi3d
-	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB +ftc_disk )
+pmempmdktest: jacobi3d
+	$(call run, ./jacobi3d 512 256 100 10 +p7 +balancer DummyLB +ftc_pmem_pmdk )
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
 
-pmemlibfttest: jacobi3d
-	$(call run, ./jacobi3d 512 256 +p7 +balancer DummyLB +ftc_pmemlib )
+disktest: jacobi3d
+	$(call run, ./jacobi3d 512 256 100 10 +p7 +balancer DummyLB +ftc_disk )
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )

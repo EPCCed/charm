@@ -2,9 +2,10 @@
 #define _CK_MEM_CHECKPT_
 
 #include "CkMemCheckpoint.decl.h"
-#include "pup.h"
 
-//#define CK_MEM_CHECKPT_DIR "/lustre/home/nx04/nx04/rrocco/files/"
+//#define CK_MEM_CHECKPT_DISK_DIR "/lustre/home/nx04/nx04/rrocco/files/"
+
+extern int CmiMyCore(void);
 
 extern CkGroupID ckCheckPTGroupID;
 class CkArrayCheckPTReqMessage: public CMessage_CkArrayCheckPTReqMessage {
@@ -54,11 +55,11 @@ public:
    virtual size_t getSize() = 0;
 };
 
-/// memory or disk checkpointing
-#define CkCheckPoint_inMEM      1
-#define CkCheckPoint_inDISK     2
-#define CkCheckPoint_inPMEM     3
-#define CkCheckPoint_inPMEMLIB  4
+/// memory/disk/persistent memory checkpointing
+#define CkCheckPoint_inMEM		1
+#define CkCheckPoint_inDISK		2
+#define CkCheckPoint_inPMEM_FSDAX	3
+#define CkCheckPoint_inPMEM_PMDK	4
 
 class CkCheckPTEntry{
   std::vector<CkArrayCheckPTMessage *> data;
@@ -73,11 +74,11 @@ public:
     if(where == CkCheckPoint_inDISK)
     {
 #if CMK_USE_MKSTEMP
-#ifdef CK_MEM_CHECKPT_DIR
+#ifdef CK_MEM_CHECKPT_DISK_DIR
 #if CMK_CONVERSE_MPI
-      fname = std::string(CK_MEM_CHECKPT_DIR) + "ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      fname = std::string(CK_MEM_CHECKPT_DISK_DIR) + "ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #else
-      fname = std::string(CK_MEM_CHECKPT_DIR) + "ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      fname = std::string(CK_MEM_CHECKPT_DISK_DIR) + "ckpt" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #endif
 #else
 #if CMK_CONVERSE_MPI
@@ -93,23 +94,12 @@ public:
 #else
       fname = tmpnam(NULL);
 #endif
-    } else if (where == CkCheckPoint_inPMEM) {
+    } else if (where == CkCheckPoint_inPMEM_FSDAX) {
 #if CMK_USE_MKSTEMP
-      int proc;
-      unsigned long a,d,c;
-      __asm__ volatile("rdtscp" : "=a" (a), "=d" (d), "=c" (c));
-      proc = (c & 0xFFF000)>>12;
-
 #if CMK_CONVERSE_MPI
-      if(proc % 2 == 0)
-        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
-      else
-        fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      fname = "/mnt/pmem_fsdax" + std::to_string(CmiMyCore()) + "/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #else
-      if(proc % 2 == 0)
-        fname = "/mnt/pmem_fsdax0/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
-      else
-        fname = "/mnt/pmem_fsdax1/tmp/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
+      fname = "/mnt/pmem_fsdax" + std::to_string(CmiMyCore()) + "/ckpt" + std::to_string(CmiMyPartition()) + "-" + std::to_string(CkMyPe()) + "-" + std::to_string(idx) + "-XXXXXX";
 #endif
       if(mkstemp(&fname[0])<0)
       {
@@ -123,7 +113,7 @@ public:
 
   void updateBuffer(int pointer, CkArrayCheckPTMessage * msg)
   {
-    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM)
+    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM_FSDAX)
     {
       envelope *env = UsrToEnv(msg);
       CkUnpackMessage(&env);
@@ -132,21 +122,17 @@ public:
       PUP::toDisk p(f);
       CkPupMessage(p, (void **)&msg);
       // delay sync to the end because otherwise the messages are blocked
-  //    fsync(fileno(f));
+      //fsync(fileno(f));
       fclose(f);
       bud1 = msg->bud1;
       bud2 = msg->bud2;
       delete msg;
-    } else if (where == CkCheckPoint_inPMEMLIB) {
+    } else if (where == CkCheckPoint_inPMEM_PMDK) {
       envelope *env = UsrToEnv(msg);
       CkUnpackMessage(&env);
       data[pointer] = (CkArrayCheckPTMessage *)EnvToUsr(env);
-      //FILE *f = fopen(fname.c_str(),"wb");
       PUP::toPmem p;
       CkPupMessage(p, (void **)&msg);
-      // delay sync to the end because otherwise the messages are blocked
-  //    fsync(fileno(f));
-      //fclose(f);
       bud1 = msg->bud1;
       bud2 = msg->bud2;
       delete msg;
@@ -164,7 +150,7 @@ public:
   
   CkArrayCheckPTMessage * getCopy(int pointer)
   {
-    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM)
+    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM_FSDAX)
     {
       CkArrayCheckPTMessage *msg;
       FILE *f = fopen(fname.c_str(),"rb");
@@ -174,12 +160,10 @@ public:
       msg->bud1 = bud1;				// update the buddies
       msg->bud2 = bud2;
       return msg;
-    } else if(where == CkCheckPoint_inPMEMLIB) {
+    } else if(where == CkCheckPoint_inPMEM_PMDK) {
       CkArrayCheckPTMessage *msg;
-      //FILE *f = fopen(fname.c_str(),"rb");
       PUP::fromPmem p;
       CkPupMessage(p, (void **)&msg);
-      //fclose(f);
       msg->bud1 = bud1;				// update the buddies
       msg->bud2 = bud2;
       return msg;

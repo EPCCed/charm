@@ -176,10 +176,10 @@ void PUP::toPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
 #endif
 	n*=itemSize;
 	memcpy((void *)buf,p,n);
-	if(pmem_is_pmem(buf, n))
-  		pmem_persist(buf,n);
+	if (pmem_is_pmem(buf, n))
+  	  pmem_persist(buf, n);
 	else
-		pmem_msync(buf, n);
+	  pmem_msync(buf, n);
 	buf+=n;
 }
 void PUP::fromPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
@@ -189,10 +189,10 @@ void PUP::fromPmem::bytes(void *p,size_t n,size_t itemSize,dataType t)
 	buf+=sizeof(pupCheckRec);
 #endif
 	n*=itemSize; 
-	if(pmem_is_pmem(buf, n))
-                pmem_persist(buf,n);
+	if (pmem_is_pmem(buf, n))
+          pmem_persist(buf, n);
         else
-                pmem_msync(buf, n);
+           pmem_msync(buf, n);
 	memcpy(p,(const void *)buf,n); 
 	buf+=n;
 }

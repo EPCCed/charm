@@ -66,6 +66,7 @@ class bar {
 #include <unistd.h>
 #include <string.h>
 #include <libpmem.h> // for pmem packers/unpackers
+extern int CmiMyCore(void);
 
 #ifndef __cplusplus
 #error "Use pup_c.h for C programs-- pup.h is for C++ programs"
@@ -482,17 +483,15 @@ class pmem : public er { //Pmem-buffer packers and unpackers
   myByte *origBuf; //Start of pmem buffer
   myByte *buf; //Pmem buffer (stuff gets packed into/out of here)
   size_t mapped_len;
+  int is_pmem;
   pmem(unsigned int type):er(type) {
-    int is_pmem;
     /* Create a pmem file */
-    if ((origBuf = buf = (myByte*) pmem_map_file("/mnt/pmem_fsdax0/chkpt", 1024*1024*1024, PMEM_FILE_CREATE,
-	0666, &mapped_len, &is_pmem)) == NULL) {
+    if ((origBuf = buf = (myByte*) pmem_map_file(("/mnt/pmem_fsdax" + std::to_string(CmiMyCore()) + "/chkpt").c_str(), 1024*1024*1024, PMEM_FILE_CREATE, 0666, &mapped_len, &is_pmem)) == NULL) {
       CmiAbort("can't open pmem file");
     }
   }
   pmem(const pmem &p);			//You don't want to copy
   void operator=(const pmem &p);		// You don't want to copy
-
   ~pmem() {
     pmem_unmap(origBuf, mapped_len);
   }
@@ -532,12 +531,12 @@ class toPmem : public pmem {
   virtual void pup_buffer(void *&p, size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, std::function<void (void *)> deallocate);
 
  public:
-  //Write data to the given buffer
+  //Write data to the preallocated buffer
   toPmem():pmem(IS_PACKING) {}
 };
 template <class T>
 inline void toPmemBuf(T &t,void *buf, size_t len) {
-	PUP::toPmem p(buf);
+	PUP::toPmem p;
 	p|t;
 	if (p.size()!=len) CmiAbort("Size mismatch during PUP::toPmemBuf!\n"
 		"This means your pup routine doesn't match during sizing and packing");
@@ -555,12 +554,12 @@ class fromPmem : public pmem {
   void pup_buffer_generic(void *&p,size_t n, size_t itemSize, dataType t, std::function<void *(size_t)> allocate, bool isMalloc);
 
  public:
-  //Read data from the given buffer
+  //Read data from the preallocated buffer
   fromPmem():pmem(IS_UNPACKING) {}
 };
 template <class T>
 inline void fromPmemBuf(T &t,void *buf,size_t len) {
-	PUP::fromPmem p(buf);
+	PUP::fromPmem p;
 	p|t;
 	if (p.size()!=len) CmiAbort("Size mismatch during PUP::fromPmemBuf!\n"
 		"This means your pup routine doesn't match during packing and unpacking");
