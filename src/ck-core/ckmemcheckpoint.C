@@ -293,9 +293,9 @@ public:
 // checkpoint holder class - for in-disk checkpointing
 class CkDiskCheckPTInfo: public CkCheckPTInfo 
 {
+protected:
   int bud1, bud2;
   size_t len; 			// checkpoint size
-protected:
   std::string fname;
 public:
   CkDiskCheckPTInfo(CkArrayID a, CkGroupID loc, CkArrayIndex idx, int pno, int myidx): CkCheckPTInfo(a, loc, idx, pno)
@@ -328,6 +328,7 @@ public:
   {
     remove(fname.c_str());
   }
+
   inline void updateBuffer(CkArrayCheckPTMessage *data) 
   {
     double t = CmiWallTimer();
@@ -364,9 +365,56 @@ public:
      CmiAssert(pNo != CkMyPe());
   }
   inline size_t getSize() {
-     return len; 
+     return len;
   }
 };
+
+class CkDirectDiskCheckPTInfo: public CkDiskCheckPTInfo 
+{
+public:
+  CkDirectDiskCheckPTInfo(CkArrayID a, CkGroupID loc, CkArrayIndex idx, int pno, int myidx): CkDiskCheckPTInfo(a, loc, idx, pno, myidx) {}
+  ~CkDirectDiskCheckPTInfo() 
+  {
+    remove(fname.c_str());
+  }
+  
+  inline void updateBuffer(CkArrayCheckPTMessage *data) 
+  {
+    double t = CmiWallTimer();
+    // unpack it
+    envelope *env = UsrToEnv(data);
+    CkUnpackMessage(&env);
+    data = (CkArrayCheckPTMessage *)EnvToUsr(env);
+    FILE *f;
+    int fd = open(fname.c_str(), O_DIRECT | O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    f = fdopen(fd, "wb");
+    PUP::toDisk p(f);
+    CkPupMessage(p, (void **)&data);
+    // delay sync to the end because otherwise the messages are blocked
+    //fsync(fileno(f));
+    fclose(f);
+    bud1 = data->bud1;
+    bud2 = data->bud2;
+    len = data->len;
+    delete data;
+    //DEBUGF("[%d] updateBuffer took %f seconds. \n", CkMyPe(), CmiWallTimer()-t);
+  }
+  inline CkArrayCheckPTMessage * getCopy()	// get a copy of checkpoint
+  {
+    CkArrayCheckPTMessage *data;
+    FILE *f;
+    int fd = open(fname.c_str(), O_DIRECT | O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    f = fdopen(fd, "rb");
+    PUP::fromDisk p(f);
+    CkPupMessage(p, (void **)&data);
+    fclose(f);
+    data->bud1 = bud1;				// update the buddies
+    data->bud2 = bud2;
+    return data;
+  }
+  
+};
+
 
 // checkpoint holder class - for in-pmem checkpointing using FSDAX
 class CkPmemFsdaxCheckPTInfo: public CkDiskCheckPTInfo 
@@ -611,6 +659,8 @@ void CkMemCheckPT::createEntry(CkArrayID aid, CkGroupID loc, CkArrayIndex index,
     newEntry = new CkPmemFsdaxCheckPTInfo(aid, loc, index, buddy, len+1);
   else if (where == CkCheckPoint_inPMEM_PMDK)
     newEntry = new CkPmemPmdkCheckPTInfo(aid, loc, index, buddy, len+1);
+  else if (where == CkCheckPoint_inDISK_DIRECT)
+    newEntry = new CkDirectDiskCheckPTInfo(aid, loc, index, buddy, len+1);
   if (newEntry != NULL)
     ckTable.push_back(newEntry);
   //DEBUGF("[%d] CkMemCheckPT::createEntry for arrayID %d:", CkMyPe(), ((CkGroupID)aid).idx); index.print(); CkPrintf("\n");
@@ -758,7 +808,7 @@ void CkMemCheckPT::recvArrayCheckpoint(CkArrayCheckPTMessage *msg)
 		  if (where == CkCheckPoint_inMEM) {
 			contribute(CkCallback(CkReductionTarget(CkMemCheckPT, cpFinish), thisProxy[cpStarter]));
 		  }
-		  else if (where == CkCheckPoint_inDISK) {
+		  else if (where == CkCheckPoint_inDISK || where == CkCheckPoint_inDISK_DIRECT) {
 			// another barrier for finalize the writing using fsync
 			contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
 		  }
@@ -858,7 +908,7 @@ void CkMemCheckPT::recvData(CkArrayCheckPTMessage *msg)
       if (where == CkCheckPoint_inMEM) {
         contribute(CkCallback(CkReductionTarget(CkMemCheckPT, cpFinish), thisProxy[cpStarter]));
       }
-      else if (where == CkCheckPoint_inDISK) {
+      else if (where == CkCheckPoint_inDISK || where == CkCheckPoint_inDISK_DIRECT) {
         // another barrier for finalize the writing using fsync
         contribute(CkCallback(CkReductionTarget(CkMemCheckPT, syncFiles), thisgroup));
       }
@@ -1730,6 +1780,9 @@ void init_memcheckpt(char **argv)
     if (CmiGetArgFlagDesc(argv, "+ftc_pmem_pmdk", "Double-PMem Checkpointing using PMDK")) {
       arg_where = CkCheckPoint_inPMEM_PMDK;
     }
+    if (CmiGetArgFlagDesc(argv, "+ftc_disk_direct", "Double-disk direct Checkpointing")) {
+      arg_where = CkCheckPoint_inDISK_DIRECT;
+    }
 
     // initiliazing _crashedNode variable
     CpvInitialize(int, _crashedNode);
@@ -1752,6 +1805,8 @@ public:
         CkPrintf("CharmFT> Activated double-pmem checkpointing using PMDK.\n");
       else if (arg_where == CkCheckPoint_inMEM)
         CkPrintf("CharmFT> Activated double in-memory checkpointing.\n");
+      else if (arg_where == CkCheckPoint_inDISK_DIRECT)
+        CkPrintf("CharmFT> Activated double-disk DIRECT checkpointing.\n");
     }
     ckCheckPTGroupID = CProxy_CkMemCheckPT::ckNew(arg_where);
 #endif

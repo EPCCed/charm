@@ -3,7 +3,7 @@
 
 #include "CkMemCheckpoint.decl.h"
 
-//#define CK_MEM_CHECKPT_DISK_DIR "/lustre/home/nx04/nx04/rrocco/files/"
+#define CK_MEM_CHECKPT_DISK_DIR "/lustre/home/nx04/nx04/rrocco/files/"
 
 extern int CmiMyCore(void);
 
@@ -60,6 +60,7 @@ public:
 #define CkCheckPoint_inDISK		2
 #define CkCheckPoint_inPMEM_FSDAX	3
 #define CkCheckPoint_inPMEM_PMDK	4
+#define CkCheckPoint_inDISK_DIRECT	5
 
 class CkCheckPTEntry{
   std::vector<CkArrayCheckPTMessage *> data;
@@ -71,7 +72,7 @@ public:
   {
     data.resize(2, NULL);
     where = _where;
-    if(where == CkCheckPoint_inDISK)
+    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inDISK_DIRECT)
     {
 #if CMK_USE_MKSTEMP
 #ifdef CK_MEM_CHECKPT_DISK_DIR
@@ -113,12 +114,18 @@ public:
 
   void updateBuffer(int pointer, CkArrayCheckPTMessage * msg)
   {
-    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM_FSDAX)
+    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM_FSDAX || where == CkCheckPoint_inDISK_DIRECT)
     {
       envelope *env = UsrToEnv(msg);
       CkUnpackMessage(&env);
       data[pointer] = (CkArrayCheckPTMessage *)EnvToUsr(env);
-      FILE *f = fopen(fname.c_str(),"wb");
+      FILE *f;
+      if(where == CkCheckPoint_inDISK_DIRECT) {
+        int fd = open(fname.c_str(), O_DIRECT | O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        f = fdopen(fd, "wb");
+      } else {
+        f = fopen(fname.c_str(),"wb");
+      }
       PUP::toDisk p(f);
       CkPupMessage(p, (void **)&msg);
       // delay sync to the end because otherwise the messages are blocked
@@ -150,10 +157,16 @@ public:
   
   CkArrayCheckPTMessage * getCopy(int pointer)
   {
-    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM_FSDAX)
+    if(where == CkCheckPoint_inDISK || where == CkCheckPoint_inPMEM_FSDAX || where == CkCheckPoint_inDISK_DIRECT)
     {
       CkArrayCheckPTMessage *msg;
-      FILE *f = fopen(fname.c_str(),"rb");
+      FILE *f;
+      if(where == CkCheckPoint_inDISK_DIRECT) {
+        int fd = open(fname.c_str(), O_DIRECT | O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+        f = fdopen(fd, "rb");
+      } else {
+        f = fopen(fname.c_str(),"rb");
+      }
       PUP::fromDisk p(f);
       CkPupMessage(p, (void **)&msg);
       fclose(f);

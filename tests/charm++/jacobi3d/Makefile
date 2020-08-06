@@ -17,7 +17,7 @@ summary: $(OBJS)
 jacobi3d.decl.h: jacobi3d.ci
 	$(CHARMC)  jacobi3d.ci
 
-fttest: memtest pmemfsdaxtest pmempmdktest disktest
+fttest: memtest pmemfsdaxtest pmempmdktest diskdirecttest  disktest
 
 memtest: jacobi3d
 	$(call run, ./jacobi3d 512 256 100 10 +p7 +balancer DummyLB )
@@ -42,6 +42,13 @@ disktest: jacobi3d
 	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
 	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
+
+diskdirecttest: jacobi3d
+	$(call run, ./jacobi3d 512 256 100 10 +p7 +balancer DummyLB +ftc_disk_direct )
+	#$(call run, ./jacobi3d 256 128 +p7 +balancer DummyLB +killFile kill_01.txt )
+	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_02.txt )
+	#$(call run, ./jacobi3d 256 256 256 64 64 32 +p7 +balancer DummyLB +killFile kill_03.txt )
+
 
 mpisyncfttest: jacobi3d
 	$(call run, ./jacobi3d 256 128 150 50 +p10 +wp8 +balancer DummyLB )
