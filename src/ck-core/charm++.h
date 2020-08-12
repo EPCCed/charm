@@ -5,6 +5,7 @@
 #include <memory.h>
 #include <type_traits>
 #include <vector>
+#include <list>
 
 #include "charm.h"
 #include "middle.h"
@@ -1406,6 +1407,23 @@ public:
 
 // Method to check if the Charm RTS initialization phase has completed
 void checkForInitDone(bool rdmaROCompleted);
+
+typedef struct S {
+  int entryIdx;
+  void *msg;
+  const CkChareID *pCid;
+  int opts;
+} SavedCall;
+
+typedef struct T {
+  CkArrayMessage *msg;
+  int ep;
+  int opts;
+} SavedArrayCall;
+
+void flush_pending();
+
+void flush_pending_arrays();
 
 #endif
 

@@ -173,6 +173,7 @@ class Main : public CBase_Main {
 		startTime = CmiWallTimer();
 
 		array.doStep();
+    flush_pending();
     }
 
     // Each worker reports back to here when it completes an iteration
@@ -199,6 +200,7 @@ class Main : public CBase_Main {
 //				CkPrintf("time=%.2f it=%d\n",times[i].first,times[i].second);
 			CkExit();
 		}
+	flush_pending();
 	}
 
 };
@@ -240,6 +242,7 @@ class Jacobi: public CBase_Jacobi {
       	constrainBC();
 
 		usesAtSync = true;
+	flush_pending();
     }
 
     Jacobi(CkMigrateMessage* m): CBase_Jacobi(m) {}
@@ -339,7 +342,7 @@ class Jacobi: public CBase_Jacobi {
         imsg = 0;
         check_and_compute();
     }	
-
+	flush_pending();
     }
 
     void receiveGhosts(ghostMsg *gmsg) {
@@ -398,6 +401,7 @@ class Jacobi: public CBase_Jacobi {
 			imsg = 0;
 			check_and_compute();
 		}
+	flush_pending();
     }
 
 

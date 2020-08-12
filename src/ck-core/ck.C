@@ -1617,35 +1617,60 @@ static inline int _prepareImmediateMsg(int eIdx,void *msg,const CkChareID *pCid)
   return destPE;
 }
 
-void CkSendMsg(int entryIdx, void *msg,const CkChareID *pCid, int opts)
-{
-  if (opts & CK_MSG_INLINE) {
-    CkSendMsgInline(entryIdx, msg, pCid, opts);
-    return;
-  }
-  envelope *env = UsrToEnv(msg);
+std::list<SavedCall*> pending_calls;
+
+void add_new_pending(int, void*, const CkChareID*, int);
+
+void CkSendMsg(int entryIdx, void *msg,const CkChareID *pCid, int opts) {
+  add_new_pending(entryIdx, msg, pCid, opts);
+}
+
+void add_new_pending(int _entryIdx, void *_msg, const CkChareID *_pCid, int _opts) {
+  CkPrintf("add_new_pending called\n");
+  SavedCall * new_entry = new SavedCall();
+  new_entry->entryIdx = _entryIdx;
+  new_entry->msg = _msg;
+  new_entry->pCid = _pCid;
+  new_entry->opts = _opts;
+  pending_calls.push_back(new_entry);
+}
+
+void flush_pending() {
+  CkPrintf("flush_pending called\n");
+  while(!pending_calls.empty()) {
+    CkPrintf("Sending a message\n");
+    SavedCall* i = pending_calls.front();
+
+    if (i->opts & CK_MSG_INLINE) {
+      CkSendMsgInline(i->entryIdx, i->msg, i->pCid, i->opts);
+      return;
+    }
+    envelope *env = UsrToEnv(i->msg);
 #if CMK_ERROR_CHECKING
   //Allow rdma metadata messages marked as immediate to go through
-  if (opts & CK_MSG_IMMEDIATE)
+    if (i->opts & CK_MSG_IMMEDIATE)
 #if CMK_ONESIDED_IMPL
-    if (CMI_ZC_MSGTYPE(env) == CMK_REG_NO_ZC_MSG)
+      if (CMI_ZC_MSGTYPE(env) == CMK_REG_NO_ZC_MSG)
 #endif
-      CmiAbort("Immediate message is not allowed in Chare!");
+        CmiAbort("Immediate message is not allowed in Chare!");
 #endif
-  int destPE=_prepareMsg(entryIdx,msg,pCid);
-  // Before it traced the creation only if destPE!=-1 (i.e it did not when the
-  // VidBlock was not yet filled). The problem is that the creation was never
-  // traced later when the VidBlock was filled. One solution is to trace the
-  // creation here, the other to trace it in VidBlock->msgDeliver().
-  _TRACE_CREATION_1(env);
-  if (destPE!=-1) {
-    CpvAccess(_qd)->create();
-    if (opts & CK_MSG_SKIP_OR_IMM)
-      _noCldEnqueue(destPE, env);
-    else
-      _CldEnqueue(destPE, env, _infoIdx);
+    int destPE=_prepareMsg(i->entryIdx,i->msg,i->pCid);
+    // Before it traced the creation only if destPE!=-1 (i.e it did not when the
+    // VidBlock was not yet filled). The problem is that the creation was never
+    // traced later when the VidBlock was filled. One solution is to trace the
+    // creation here, the other to trace it in VidBlock->msgDeliver().
+    _TRACE_CREATION_1(env);
+    if (destPE!=-1) {
+      CpvAccess(_qd)->create();
+      if (i->opts & CK_MSG_SKIP_OR_IMM)
+        _noCldEnqueue(destPE, env);
+      else
+        _CldEnqueue(destPE, env, _infoIdx);
+    }
+    _TRACE_CREATION_DONE(1);
+    pending_calls.pop_front();
+    delete i;
   }
-  _TRACE_CREATION_DONE(1);
 }
 
 void CkSendMsgInline(int entryIndex, void *msg, const CkChareID *pCid, int opts)

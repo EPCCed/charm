@@ -55,6 +55,7 @@ Orion Sky Lawlor, olawlor@acm.org
 #include "pathHistory.h"
 #include "ckarray.h"
 #include <stdarg.h>
+#include <list>
 
 CpvDeclare(int ,serializer); // if !CMK_FAULT_EVAC, serializer is always 0
 
@@ -1093,30 +1094,55 @@ void msg_prepareSend_noinline(CkArrayMessage *msg, int ep,CkArrayID aid)
 #endif
 }
 
+std::list<SavedArrayCall*> pending_array_calls;
+
+void add_new_pending_array(CkArrayMessage *, int, int);
+
 void CProxyElement_ArrayBase::ckSend(CkArrayMessage *msg, int ep, int opts) const
 {
+	add_new_pending_array(msg, ep, opts);
+}
+
+void add_new_pending_array(CkArrayMessage *_msg, int _ep, int _opts) {
+  CkPrintf("add_new_pending_array called\n");
+  SavedArrayCall* new_entry = new SavedArrayCall();
+  new_entry->msg = _msg;
+  new_netry->ep = _ep;
+  new_entry->opts = _opts;
+  pending_array_calls.push_back(new_entry);
+}
+
+
+void flush_pending_array() {
+	CkPrintf("flush_pending_array called\n");
+	while(!pending_array_calls.empty()) {
+		CkPrintf("Sending a message\n");
+		SavedArrayCall* i = pending_array_calls.front();
 #if CMK_ERROR_CHECKING
-	//Check our array index for validity
-	if (_idx.nInts<0) CkAbort("Array index length is negative!\n");
-	if (_idx.nInts>CK_ARRAYINDEX_MAXLEN)
-		CkAbort("Array index length (nInts) is too long-- did you "
-			"use bytes instead of integers?\n");
+		//Check our array index for validity
+		if (_idx.nInts<0) CkAbort("Array index length is negative!\n");
+		if (_idx.nInts>CK_ARRAYINDEX_MAXLEN)
+			CkAbort("Array index length (nInts) is too long-- did you "
+				"use bytes instead of integers?\n");
 #endif
-	msg_prepareSend(msg, ep, ckGetArrayID());
-	if (ckIsDelegated()) //Just call our delegateMgr
-	  ckDelegatedTo()->ArraySend(ckDelegatedPtr(),ep,msg,_idx,ckGetArrayID());
-	else 
-	{ //Usual case: a direct send
-	  CkArray *localbranch = ckLocalBranch();
-	  if (localbranch == NULL) { // array not created yet
-	    CkAbort("Cannot send a message from an array without a local branch");
-	  }
-	  else {
-	    if (opts & CK_MSG_INLINE)
-	      localbranch->deliver(msg, _idx, CkDeliver_inline, opts & (~CK_MSG_INLINE));
-	    else
-	      localbranch->deliver(msg, _idx, CkDeliver_queue, opts);
-	  }
+		msg_prepareSend(i->msg, i->ep, ckGetArrayID());
+		if (ckIsDelegated()) //Just call our delegateMgr
+	  	  ckDelegatedTo()->ArraySend(ckDelegatedPtr(),i->ep,i->msg,_idx,ckGetArrayID());
+		else 
+		{ //Usual case: a direct send
+	  	CkArray *localbranch = ckLocalBranch();
+	  	if (localbranch == NULL) { // array not created yet
+	  	  CkAbort("Cannot send a message from an array without a local branch");
+	  	}
+	  	else {
+	    		if (i->opts & CK_MSG_INLINE)
+	      			localbranch->deliver(i->msg, _idx, CkDeliver_inline, i->opts & (~CK_MSG_INLINE));
+	    		else
+	      			localbranch->deliver(i->msg, _idx, CkDeliver_queue, i->opts);
+	  		}
+		}
+		pending_array_calls.pop_front();
+		delete i;
 	}
 }
 
