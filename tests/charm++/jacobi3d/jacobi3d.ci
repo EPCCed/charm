@@ -22,7 +22,7 @@ mainmodule jacobi3d {
 
   mainchare Main {
     entry Main(CkArgMsg *m);
-    entry void report(CkReductionMsg *msg);
+    entry void report(int iterations);
   };
 
   array [3D] Jacobi {

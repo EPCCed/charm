@@ -1408,6 +1408,8 @@ public:
 // Method to check if the Charm RTS initialization phase has completed
 void checkForInitDone(bool rdmaROCompleted);
 
+class CProxyElement_ArrayBase;
+
 typedef struct S {
   int entryIdx;
   void *msg;
@@ -1419,6 +1421,7 @@ typedef struct T {
   CkArrayMessage *msg;
   int ep;
   int opts;
+  const CProxyElement_ArrayBase* pointer;
 } SavedArrayCall;
 
 void flush_pending();

@@ -1626,7 +1626,7 @@ void CkSendMsg(int entryIdx, void *msg,const CkChareID *pCid, int opts) {
 }
 
 void add_new_pending(int _entryIdx, void *_msg, const CkChareID *_pCid, int _opts) {
-  CkPrintf("add_new_pending called\n");
+//  CkPrintf("[%d] add_new_pending called\n", CkMyPe());
   SavedCall * new_entry = new SavedCall();
   new_entry->entryIdx = _entryIdx;
   new_entry->msg = _msg;
@@ -1636,9 +1636,9 @@ void add_new_pending(int _entryIdx, void *_msg, const CkChareID *_pCid, int _opt
 }
 
 void flush_pending() {
-  CkPrintf("flush_pending called\n");
+//  CkPrintf("[%d] flush_pending called\n", CkMyPe());
   while(!pending_calls.empty()) {
-    CkPrintf("Sending a message\n");
+//    CkPrintf("[%d] Sending a message\n", CkMyPe());
     SavedCall* i = pending_calls.front();
 
     if (i->opts & CK_MSG_INLINE) {

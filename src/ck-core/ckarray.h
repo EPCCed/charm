@@ -174,6 +174,8 @@ public:
 
 	ArrayElement *ckLocal(void) const;
 	void pup(PUP::er &p);
+	
+	void flush_pending_array(CkArrayMessage *_msg, int _ep, int _opts) const;
 };
 
 

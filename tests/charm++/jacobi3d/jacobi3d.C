@@ -96,6 +96,7 @@ class Main : public CBase_Main {
   public:
     CProxy_Jacobi array;
     int iterations;
+    int num, arraySize;
 	std::vector<std::pair<double,int> > times;
 
     Main(CkArgMsg* m) {
@@ -158,7 +159,8 @@ class Main : public CBase_Main {
 
       // Create new array of worker chares
       array = CProxy_Jacobi::ckNew(num_chare_x, num_chare_y, num_chare_z);
-
+	arraySize = num_chare_x * num_chare_y * num_chare_z;
+	num = 0;
       CkArray *jarr = array.ckLocalBranch();
       std::vector<std::vector<std::vector<int>>> jmap(num_chare_x, std::vector<std::vector<int> >(num_chare_y,std::vector <int>(num_chare_z)));
 
@@ -174,12 +176,15 @@ class Main : public CBase_Main {
 
 		array.doStep();
     flush_pending();
+    flush_pending_arrays();
     }
 
     // Each worker reports back to here when it completes an iteration
-	void report(CkReductionMsg *msg) {
-		int *value = (int *)msg->getData();
-    	iterations = value[0];
+	void report(int iterations) {
+		//int *value = (int *)msg->getData();
+    	//iterations = value[0];
+		if(++num < arraySize) return;
+		num = 0;
 		if (iterations < maxIter) {
 			times.push_back(std::make_pair(CmiWallTimer() - startTime,iterations));
 #ifdef CMK_MEM_CHECKPOINT
@@ -201,6 +206,7 @@ class Main : public CBase_Main {
 			CkExit();
 		}
 	flush_pending();
+	flush_pending_arrays();
 	}
 
 };
@@ -223,7 +229,6 @@ class Jacobi: public CBase_Jacobi {
     Jacobi() {
 
     	int i, j, k;
-    	
 		// allocate a three dimensional array
 		temperature = new double[(blockDimX+2) * (blockDimY+2) * (blockDimZ+2)];
     	new_temperature = new double[(blockDimX+2) * (blockDimY+2) * (blockDimZ+2)];
@@ -243,6 +248,7 @@ class Jacobi: public CBase_Jacobi {
 
 		usesAtSync = true;
 	flush_pending();
+	flush_pending_arrays();
     }
 
     Jacobi(CkMigrateMessage* m): CBase_Jacobi(m) {}
@@ -343,6 +349,7 @@ class Jacobi: public CBase_Jacobi {
         check_and_compute();
     }	
 	flush_pending();
+	flush_pending_arrays();
     }
 
     void receiveGhosts(ghostMsg *gmsg) {
@@ -402,6 +409,7 @@ class Jacobi: public CBase_Jacobi {
 			check_and_compute();
 		}
 	flush_pending();
+	flush_pending_arrays();
     }
 
 
@@ -421,17 +429,19 @@ class Jacobi: public CBase_Jacobi {
 		} else
 #endif
     {
-      CkCallback cb(CkIndex_Main::report(NULL), mainProxy);
-			contribute(sizeof(int), &iterations, CkReduction::max_int, cb);
+      //CkCallback cb(CkIndex_Main::report(NULL), mainProxy);
+	//		contribute(sizeof(int), &iterations, CkReduction::max_int, cb);
+		mainProxy.report(iterations);
 		}
 	}
 
 	void ResumeFromSync(){
-    CkCallback cb(CkIndex_Main::report(NULL), mainProxy);
-		contribute(sizeof(int), &iterations, CkReduction::max_int, cb);
+//    CkCallback cb(CkIndex_Main::report(NULL), mainProxy);
+//		contribute(sizeof(int), &iterations, CkReduction::max_int, cb);
+		mainProxy.report(iterations);
 	}
 
-    // Check to see if we have received all neighbor values yet
+    // Check to flushsee if we have received all neighbor values yet
     // If all neighbor values have been received, we update our values and proceed
 	void compute_kernel() {
 
